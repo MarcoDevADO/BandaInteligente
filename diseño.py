@@ -75,7 +75,7 @@ class MainApp(QMainWindow):
     def Servo(self):
         if self.arduino:
             self.arduino.write(b"SERVO_ON\n")
-            print("🔧 Servo a 180°")
+            print("🔧 Se activo el SERVO")
 
     def redneural(self):
         ret, frame = self.cap.read()

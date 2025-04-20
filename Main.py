@@ -4,6 +4,7 @@ from PyQt5.QtGui import *
 import serial, time, cv2, os
 from ultralytics import YOLO
 from db import DBManager
+import pyqtgraph as pg
 
 ruta_best = os.path.join("runs", "detect", "train4", "weights", "best.pt")
 model = YOLO(ruta_best)
@@ -11,7 +12,6 @@ model = YOLO(ruta_best)
 class MainApp(QMainWindow):
     def __init__(self, parent=None, *args):
         super(MainApp, self).__init__(parent=parent)
-        self.setFixedSize(800, 600)
         self.setWindowTitle("ArdControl")
         # Conexión con Arduino
         try:
@@ -38,6 +38,12 @@ class MainApp(QMainWindow):
         self.ServoButton.clicked.connect(self.Servo)
         self.OffButton.clicked.connect(self.offbanda)
 
+        self.graphWidget = pg.PlotWidget()
+        self.graphWidget.setBackground('w')
+        self.graphWidget.setTitle("Registro de piezas por lote")
+        self.graphWidget.setLabel('left', 'Cantidad')
+        self.graphWidget.setLabel('bottom', 'Tipo')
+
         # Layout horizontal para botones
         botones_layout = QHBoxLayout()
         botones_layout.addWidget(self.PowerButton)
@@ -50,6 +56,7 @@ class MainApp(QMainWindow):
         layout.addWidget(self.cameraLabel, 0, 0)
         layout.addLayout(botones_layout, 1, 0)
         layout.addWidget(self.comboLotes, 2, 0)
+        layout.addWidget(self.graphWidget, 0, 1)
 
         # Set layout en widget central
         central_widget = QWidget()
@@ -65,6 +72,17 @@ class MainApp(QMainWindow):
         self.timer = QTimer()
         self.timer.timeout.connect(self.redneural)
         self.timer.start(30)
+        self.graphWidget.addLegend()
+
+        # Variables para el gráfico
+        self.data_x = list(range(100))
+        self.data_y = [0]*100
+        self.contador = 0
+
+        # Timer para actualizar la gráfica
+        self.graph_timer = QTimer()
+        self.graph_timer.timeout.connect(self.actualizar_grafica)
+        self.graph_timer.start(500)  # cada medio segundo
 
         self.db = DBManager()
         self.llenar_lista_desde_db()
@@ -82,7 +100,7 @@ class MainApp(QMainWindow):
     def Servo(self):
         if self.arduino:
             self.arduino.write(b"SERVO_ON\n")
-            print("🔧 Servo a 180°")
+            print("🔧 Se activo el SERVO")
 
     def llenar_lista_desde_db(self):
         """Llena el QListWidget con los lotes desde DB"""
@@ -90,6 +108,34 @@ class MainApp(QMainWindow):
         lotes = self.db.obtener_lotes()
         for lote in lotes:
             self.comboLotes.addItem(lote)
+
+    def actualizar_grafica(self):
+        lote_actual = self.comboLotes.currentText()
+        if not lote_actual:
+            return
+
+        resultado = self.db.obtener_validos_y_no_validos_por_lote(lote_actual)
+
+        if resultado:
+            validos, no_validos = map(float, resultado)
+
+            # Limpia cualquier gráfico anterior
+            self.graphWidget.clear()
+
+            # Dibuja las barras con etiquetas
+            bar_validos = pg.BarGraphItem(x=[1], height=[validos], width=0.4, brush='g')
+            bar_no_validos = pg.BarGraphItem(x=[2], height=[no_validos], width=0.4, brush='r')
+
+            self.graphWidget.addItem(bar_validos)
+            self.graphWidget.addItem(bar_no_validos)
+
+            # Ejes con etiquetas personalizadas
+            ax = self.graphWidget.getAxis('bottom')
+            ax.setTicks([[(1, 'Válidos'), (2, 'No válidos')]])
+
+
+
+
 
     def redneural(self):
         ret, frame = self.cap.read()
