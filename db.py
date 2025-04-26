@@ -1,4 +1,6 @@
 import mysql.connector
+import datetime
+from datetime import datetime
 
 class DBManager:
     def __init__(self):
@@ -44,9 +46,15 @@ class DBManager:
         resultado = cursor.fetchone()
         cursor.close()
         return resultado
-
-
-
+    
+    def insertar_objeto(self, ancho, largo, valido, fecha, lote):
+        """Inserta un nuevo objeto en la base de datos"""
+        query = "INSERT INTO registro_piezas (ancho, largo, valido, fecha,lote) VALUES (%s, %s, %s, %s, %s)"
+        valores = (ancho, largo, valido, fecha, lote)
+        self.cursor.execute(query, valores)
+        self.conn.commit()
+        print("✅ Objeto insertado en la base de datos")
+    
     def cerrar_conexion(self):
         if self.conn:
             self.conn.close()

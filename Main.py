@@ -5,6 +5,9 @@ import serial, time, cv2, os
 from ultralytics import YOLO
 from db import DBManager
 import pyqtgraph as pg
+import datetime
+from datetime import datetime
+import time
 
 #ruta del modelo YOLOv8
 #Asegúrate de que la ruta sea correcta y que el modelo esté disponible
@@ -15,6 +18,7 @@ class MainApp(QMainWindow):
     def __init__(self, parent=None, *args):
         super(MainApp, self).__init__(parent=parent)
         self.setWindowTitle("ArdControl")
+        self.deley = time.time()
         # Conexión con Arduino
         try:
             self.arduino = serial.Serial('COM5', 9600, timeout=1)
@@ -50,7 +54,7 @@ class MainApp(QMainWindow):
         self.nuevolote.setEnabled(False)
         self.nuevolote.setStyleSheet("background-color: white")
         self.nuevolote.setPlaceholderText("Nuevo Lote")
-        self.nuevolote.setMaxLength(30)
+        self.nuevolote.setMaxLength(20)
 
         # CheckBox para agregar nuevo lote
         self.checknuevolote = QCheckBox("Agregar nuevo lote")
@@ -65,7 +69,11 @@ class MainApp(QMainWindow):
         botones_layout = QHBoxLayout()
         botones_layout.addWidget(self.PowerButton)
         botones_layout.addWidget(self.OffButton)
-        
+
+        self.total_label = QLabel()
+        self.total_label.setText("Total: 0")
+        self.total_label.setStyleSheet("font-size: 20px; font-weight: bold; color: black;")
+        self.total_label.setAlignment(Qt.AlignCenter)
 
         # Layout principal
         layout = QGridLayout()
@@ -76,6 +84,7 @@ class MainApp(QMainWindow):
         layout.addWidget(self.agregarlote, 3, 1)
         layout.addWidget(self.checknuevolote, 2, 1)
         layout.addWidget(self.graphWidget, 0, 2)
+        layout.addWidget(self.total_label, 1, 2)
 
         # Set layout en widget central
         central_widget = QWidget()
@@ -155,6 +164,8 @@ class MainApp(QMainWindow):
 
         if resultado:
             validos, no_validos = map(float, resultado)
+            self.total_label.setText(f"Total: {validos + no_validos}")
+            self.graphWidget.setTitle(f"Registro de piezas por lote: {lote_actual}")
 
             # Limpia cualquier gráfico anterior
             self.graphWidget.clear()
@@ -178,6 +189,39 @@ class MainApp(QMainWindow):
 
         results = model.predict(frame, imgsz=640, conf=0.6)
         annotated_frame = results[0].plot()
+        if results[0].boxes and len(results[0].boxes) > 0 and time.time() - self.deley > 5:
+            print("🔍 Detectando objetos...")
+            nombres_detectados = results[0].names
+            clases_detectadas = results[0].boxes.cls.tolist()
+            clases_detectadas = [int(c) for c in clases_detectadas]
+            nombres = [nombres_detectados[c] for c in clases_detectadas]
+            boxes = results[0].boxes.xyxy.tolist()
+
+            lote_actual = self.comboLotes.currentText()
+
+            for i, box in enumerate(boxes):
+                print(f"🔍 Objeto detectado: {nombres[i]}")
+                x1, y1, x2, y2 = box
+                ancho = float(x2 - x1)
+                largo = float(y2 - y1)
+                nombre = nombres[i]
+
+                valido = True if nombre == "limon" else False
+                self.db.insertar_objeto(ancho=ancho, largo=largo, valido=valido,fecha=datetime.now() ,lote=lote_actual)
+                print(f"💾 Guardando en DB: {lote_actual}, {nombre}, {ancho}px x {largo}px")
+                                      
+            if self.arduino:
+                # Enviar una señal específica según el tipo de objeto
+                for nombre in nombres:
+                    if nombre == "limon":
+                        self.arduino.write(b"LED_ON\n")
+                    if nombre == "nolimon":
+                        self.arduino.write(b"LED_OFF\n")
+            else:
+                if self.arduino:
+                    self.arduino.write(b"LED_OFF\n")  # apaga todos los LEDs si no detecta nada
+
+            self.deley = time.time()
 
         # Convertir a QImage para mostrar en QLabel
         rgb_image = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
