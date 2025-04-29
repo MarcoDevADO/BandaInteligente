@@ -21,7 +21,9 @@ class MainApp(QMainWindow):
         self.deley = time.time()
         # Conexión con Arduino
         try:
-            self.arduino = serial.Serial('COM5', 9600, timeout=1)
+            # Cambia 'COM8' por el puerto correcto de tu Arduino
+            # Asegúrate de que el puerto esté disponible y sea correcto
+            self.arduino = serial.Serial('COM8', 9600, timeout=1)
             time.sleep(2)
             print("Conectado al Arduino")
         except:
@@ -38,6 +40,9 @@ class MainApp(QMainWindow):
         self.OffButton = QPushButton("OFF")
         self.PowerButton.clicked.connect(self.BandaPower)
         self.OffButton.clicked.connect(self.offbanda)
+
+        self.servo = QPushButton("Servo")
+        self.servo.clicked.connect(self.Servo)
 
         #comboBox para seleccionar lotes
         self.comboLotes = QComboBox()
@@ -82,6 +87,7 @@ class MainApp(QMainWindow):
         layout.addWidget(self.comboLotes, 2, 0)
         layout.addWidget(self.nuevolote, 3, 0)
         layout.addWidget(self.agregarlote, 3, 1)
+        layout.addWidget(self.servo, 1, 1)
         layout.addWidget(self.checknuevolote, 2, 1)
         layout.addWidget(self.graphWidget, 0, 2)
         layout.addWidget(self.total_label, 1, 2)
@@ -115,20 +121,19 @@ class MainApp(QMainWindow):
         # Inicializar la base de datos para obtener los lotes
         self.db = DBManager()
         self.llenar_lista_desde_db()
+        self.objeto_actual = None
+        self.objeto_visto_anteriormente = None
 
     def BandaPower(self):
-        if self.arduino:
-            self.arduino.write(b"RELE_ON\n")
+            self.enviar_comando("RELE_ON")
             print("🔌 Relé encendido")
 
     def offbanda(self):
-        if self.arduino:
-            self.arduino.write(b"RELE_OFF\n")
+            self.enviar_comando("RELE_OFF")
             print("🔌 Relé apagado")
 
     def Servo(self):
-        if self.arduino:
-            self.arduino.write(b"SERVO_ON\n")
+            self.enviar_comando("SERVO_ON")
             print("🔧 Se activo el SERVO")
 
     def llenar_lista_desde_db(self):
@@ -138,9 +143,36 @@ class MainApp(QMainWindow):
         for lote in lotes:
             self.comboLotes.addItem(lote)
 
+    def enviar_comando(self, comando):
+        if self.arduino and self.arduino.is_open:
+            print(f"🔄 Enviando comando: {comando}")
+            try:
+                self.arduino.write(comando.encode('utf-8') + b"\n")
+                print(f"✅ Comando '{comando}' enviado")
+            except Exception as e:
+                print(f"❌ Error al enviar comando: {e}")
+        else:
+            print("⚠️ Arduino no conectado.")
+
+        print("fin del metodo")
+
+    def controlar_actuadores(self, tipo_objeto):
+        comandos = {
+            "miliometrico": ["LED_ON"],
+            "tuerca": ["LED_OFF", "SERVO_ON"],
+        }
+        if tipo_objeto in comandos:
+            for cmd in comandos[tipo_objeto]:
+                self.enviar_comando(cmd)
+        else:
+            self.enviar_comando("LED_OFFALL")
+            self.enviar_comando("ENCENDER_BANDA")
+            
     def agregar_lote(self):
         nuevo_lote = self.nuevolote.text().strip()
 
+        #Verifica si el LineEdit esta vacio sino es sino agrega el lote
+        #y limpia el campo de texto
         if not nuevo_lote:
             QMessageBox.warning(self, "⚠️ Lote vacío", "Por favor ingresa un nombre para el nuevo lote.")
             return
@@ -149,6 +181,7 @@ class MainApp(QMainWindow):
             QMessageBox.information(self, "ℹ️ Lote existente", f"El lote '{nuevo_lote}' ya está en la lista.")
             return
 
+        # Agregar el nuevo lote al comboBox
         self.comboLotes.addItem(nuevo_lote)
         self.comboLotes.setCurrentText(nuevo_lote)
         self.nuevolote.clear()
@@ -161,7 +194,8 @@ class MainApp(QMainWindow):
             return
 
         resultado = self.db.obtener_validos_y_no_validos_por_lote(lote_actual)
-
+        
+        # Verifica si el resultado es válido
         if resultado:
             validos, no_validos = map(float, resultado)
             self.total_label.setText(f"Total: {validos + no_validos}")
@@ -183,45 +217,43 @@ class MainApp(QMainWindow):
             ax.setTicks([[(1, 'Válidos'), (2, 'No válidos')]])
 
     def redneural(self):
+        # Lee un frame de la cámara
         ret, frame = self.cap.read()
+        # Si no se puede leer el frame, retorna
         if not ret:
             return
-
+        # Redimensiona el frame a 640x640
         results = model.predict(frame, imgsz=640, conf=0.6)
         annotated_frame = results[0].plot()
-        if results[0].boxes and len(results[0].boxes) > 0 and time.time() - self.deley > 5:
+
+        if results[0].boxes and len(results[0].boxes) > 0 and time.time() - self.deley > 4:
+            self.enviar_comando("DETENER_BANDA")
             print("🔍 Detectando objetos...")
             nombres_detectados = results[0].names
             clases_detectadas = results[0].boxes.cls.tolist()
             clases_detectadas = [int(c) for c in clases_detectadas]
             nombres = [nombres_detectados[c] for c in clases_detectadas]
             boxes = results[0].boxes.xyxy.tolist()
-
             lote_actual = self.comboLotes.currentText()
 
+            #bucle para guardar los objetos detectados en la base de datos
             for i, box in enumerate(boxes):
                 print(f"🔍 Objeto detectado: {nombres[i]}")
+                nombre = nombres[i]
                 x1, y1, x2, y2 = box
                 ancho = float(x2 - x1)
                 largo = float(y2 - y1)
                 nombre = nombres[i]
 
-                valido = True if nombre == "limon" else False
+                valido = True if nombre == "tuerca" else False
                 self.db.insertar_objeto(ancho=ancho, largo=largo, valido=valido,fecha=datetime.now() ,lote=lote_actual)
                 print(f"💾 Guardando en DB: {lote_actual}, {nombre}, {ancho}px x {largo}px")
-                                      
-            if self.arduino:
-                # Enviar una señal específica según el tipo de objeto
-                for nombre in nombres:
-                    if nombre == "limon":
-                        self.arduino.write(b"LED_ON\n")
-                    if nombre == "nolimon":
-                        self.arduino.write(b"LED_OFF\n")
-            else:
-                if self.arduino:
-                    self.arduino.write(b"LED_OFF\n")  # apaga todos los LEDs si no detecta nada
 
-            self.deley = time.time()
+            self.controlar_actuadores(nombre)
+            # Enviar comando al Arduino para encender la banda después de 2 segundos
+            # Esto es para evitar que se envíe el comando inmediatamente después de detectar un objeto
+            QTimer.singleShot(2000, lambda: self.enviar_comando("ENCENDER_BANDA"))
+            self.deley = time.time()  # Actualizar deley después de cada detección
 
         # Convertir a QImage para mostrar en QLabel
         rgb_image = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
