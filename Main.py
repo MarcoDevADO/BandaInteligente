@@ -3,6 +3,7 @@ from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 import serial, time, cv2, os
 from ultralytics import YOLO
+import serial.tools.list_ports
 from db import DBManager
 import pyqtgraph as pg
 import datetime
@@ -20,15 +21,22 @@ class MainApp(QMainWindow):
         self.setWindowTitle("ArdControl")
         self.deley = time.time()
         # Conexión con Arduino
-        try:
+        self.selected_com = None
+        self.selected_camera_index = 0  # Por defecto
             # Cambia 'COM8' por el puerto correcto de tu Arduino
             # Asegúrate de que el puerto esté disponible y sea correcto
-            self.arduino = serial.Serial('COM8', 9600, timeout=1)
-            time.sleep(2)
-            print("Conectado al Arduino")
-        except:
-            self.arduino = None
-            print("⚠️ No se pudo conectar al Arduino")
+        
+
+        # ComboBox para seleccionar puerto COM
+        self.comboCOMs = QComboBox()
+        self.comboCOMs.addItems(self.obtener_puertos_com())
+        self.comboCOMs.currentTextChanged.connect(self.actualizar_puerto_com)
+
+        # ComboBox para seleccionar cámara
+        self.comboCamaras = QComboBox()
+        camaras = self.obtener_camaras_disponibles()
+        self.comboCamaras.addItems([f"Cam {i}" for i in camaras])
+        self.comboCamaras.currentIndexChanged.connect(lambda index: self.actualizar_indice_camara(camaras[index]))
 
         # QLabel para mostrar la cámara
         self.cameraLabel = QLabel()
@@ -36,8 +44,10 @@ class MainApp(QMainWindow):
         self.cameraLabel.setStyleSheet("background-color: black")
 
         # Botones para encender/apagar la banda
-        self.PowerButton = QPushButton("Power")
-        self.OffButton = QPushButton("OFF")
+        self.PowerButton = QPushButton("LADO 1 ►")
+        self.OffButton = QPushButton("LADO 2 ◄")
+        self.Conectar = QPushButton("Conectar con Arduino")
+        self.Conectar.clicked.connect(self.IniciarArduino)
         self.PowerButton.clicked.connect(self.BandaPower)
         self.OffButton.clicked.connect(self.offbanda)
 
@@ -87,10 +97,14 @@ class MainApp(QMainWindow):
         layout.addWidget(self.comboLotes, 2, 0)
         layout.addWidget(self.nuevolote, 3, 0)
         layout.addWidget(self.agregarlote, 3, 1)
-        layout.addWidget(self.servo, 1, 1)
+        layout.addWidget(self.Conectar, 1, 1)
         layout.addWidget(self.checknuevolote, 2, 1)
         layout.addWidget(self.graphWidget, 0, 2)
         layout.addWidget(self.total_label, 1, 2)
+        layout.addWidget(QLabel("Puerto COM:"), 4, 0)
+        layout.addWidget(self.comboCOMs, 4, 1)
+        layout.addWidget(QLabel("Cámara:"), 5, 0)
+        layout.addWidget(self.comboCamaras, 5, 1)
 
         # Set layout en widget central
         central_widget = QWidget()
@@ -98,7 +112,10 @@ class MainApp(QMainWindow):
         self.setCentralWidget(central_widget)
 
         # Iniciar cámara
-        self.cap = cv2.VideoCapture(0)
+        if self.comboCamaras.count() >= 0:
+            self.selected_camera_index = int(self.comboCamaras.currentText().split()[1])
+
+        self.cap= cv2.VideoCapture(self.selected_camera_index)
         self.cap.set(3, 1280)
         self.cap.set(4, 720)
 
@@ -123,17 +140,30 @@ class MainApp(QMainWindow):
         self.llenar_lista_desde_db()
         self.objeto_actual = None
         self.objeto_visto_anteriormente = None
+    
+    def IniciarArduino(self):
+        if self.comboCOMs.count() >= 0:
+            self.selected_com = self.comboCOMs.currentText()
+            try:
+                self.arduino = serial.Serial(self.selected_com, 9600, timeout=1)
+                time.sleep(2)
+                print("Conectado al Arduino")
+            except:
+                self.arduino = None
+                print("⚠️ No se pudo conectar al Arduino")
+        else:
+            print("⚠️ No hay puertos COM disponibles")
 
     def BandaPower(self):
-            self.enviar_comando("RELE_ON")
+            #self.enviar_comando("RELE_ON")
             print("🔌 Relé encendido")
 
     def offbanda(self):
-            self.enviar_comando("RELE_OFF")
+            #self.enviar_comando("RELE_OFF")
             print("🔌 Relé apagado")
 
     def Servo(self):
-            self.enviar_comando("SERVO_ON")
+            #self.enviar_comando("SERVO_ON")
             print("🔧 Se activo el SERVO")
 
     def llenar_lista_desde_db(self):
@@ -187,6 +217,24 @@ class MainApp(QMainWindow):
         self.nuevolote.clear()
         self.checknuevolote.setChecked(False)
         QMessageBox.information(self, "✅ Lote agregado", f"Lote '{nuevo_lote}' agregado exitosamente.")
+
+    def obtener_puertos_com(self):
+        return [port.device for port in serial.tools.list_ports.comports()]
+    
+    def actualizar_puerto_com(self, com):
+        self.selected_com = com
+
+    def actualizar_indice_camara(self, index):
+        self.selected_camera_index = index
+
+    def obtener_camaras_disponibles(self,max_camaras=5):
+        disponibles = []
+        for i in range(max_camaras):
+            cap = cv2.VideoCapture(i)
+            if cap.isOpened():
+                disponibles.append(i)
+                cap.release()
+        return disponibles
 
     def actualizar_grafica(self):
         lote_actual = self.comboLotes.currentText()
