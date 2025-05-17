@@ -44,12 +44,16 @@ class MainApp(QMainWindow):
         self.cameraLabel.setStyleSheet("background-color: black")
 
         # Botones para encender/apagar la banda
-        self.PowerButton = QPushButton("LADO 1 ►")
-        self.OffButton = QPushButton("LADO 2 ◄")
-        self.Conectar = QPushButton("Conectar con Arduino")
-        self.Conectar.clicked.connect(self.IniciarArduino)
-        self.PowerButton.clicked.connect(self.BandaPower)
-        self.OffButton.clicked.connect(self.offbanda)
+        self.DerechaButton = QPushButton("LADO 1 ►")
+        self.IzquierdaButton = QPushButton("LADO 2 ◄")
+        self.BotonConecArd = QPushButton("Conectar con Arduino")
+        self.BotonConecCam = QPushButton("Conectar con Camara")
+        self.BotonServo = QPushButton("Servo")
+        self.DerechaButton.clicked.connect(self.DercPower)
+        self.IzquierdaButton.clicked.connect(self.IzquiPower)
+        self.BotonConecArd.clicked.connect(self.ConectarArd)
+        self.BotonConecCam.clicked.connect(self.ConectarCam)
+        self.BotonServo.clicked.connect(self.Servo)
 
         self.servo = QPushButton("Servo")
         self.servo.clicked.connect(self.Servo)
@@ -82,8 +86,8 @@ class MainApp(QMainWindow):
 
         # Layout horizontal para botones
         botones_layout = QHBoxLayout()
-        botones_layout.addWidget(self.PowerButton)
-        botones_layout.addWidget(self.OffButton)
+        botones_layout.addWidget(self.DerechaButton)
+        botones_layout.addWidget(self.IzquierdaButton)
 
         self.total_label = QLabel()
         self.total_label.setText("Total: 0")
@@ -97,7 +101,8 @@ class MainApp(QMainWindow):
         layout.addWidget(self.comboLotes, 2, 0)
         layout.addWidget(self.nuevolote, 3, 0)
         layout.addWidget(self.agregarlote, 3, 1)
-        layout.addWidget(self.Conectar, 1, 1)
+        layout.addWidget(self.BotonConecArd, 4, 2)
+        layout.addWidget(self.BotonConecCam, 5, 2)
         layout.addWidget(self.checknuevolote, 2, 1)
         layout.addWidget(self.graphWidget, 0, 2)
         layout.addWidget(self.total_label, 1, 2)
@@ -105,19 +110,12 @@ class MainApp(QMainWindow):
         layout.addWidget(self.comboCOMs, 4, 1)
         layout.addWidget(QLabel("Cámara:"), 5, 0)
         layout.addWidget(self.comboCamaras, 5, 1)
+        layout.addWidget(self.BotonServo, 3, 2)
 
         # Set layout en widget central
         central_widget = QWidget()
         central_widget.setLayout(layout)
         self.setCentralWidget(central_widget)
-
-        # Iniciar cámara
-        if self.comboCamaras.count() >= 0:
-            self.selected_camera_index = int(self.comboCamaras.currentText().split()[1])
-
-        self.cap= cv2.VideoCapture(self.selected_camera_index)
-        self.cap.set(3, 1280)
-        self.cap.set(4, 720)
 
         # Timer para actualizar la imagen cada 30 ms
         self.timer = QTimer()
@@ -141,30 +139,37 @@ class MainApp(QMainWindow):
         self.objeto_actual = None
         self.objeto_visto_anteriormente = None
     
-    def IniciarArduino(self):
-        if self.comboCOMs.count() >= 0:
+    def ConectarArd(self):
+        if self.comboCOMs.count() > 0:
             self.selected_com = self.comboCOMs.currentText()
             try:
                 self.arduino = serial.Serial(self.selected_com, 9600, timeout=1)
                 time.sleep(2)
-                print("Conectado al Arduino")
+                QMessageBox.information(self, "✅ Conexión exitosa", f"Conectado a {self.selected_com}")
             except:
                 self.arduino = None
-                print("⚠️ No se pudo conectar al Arduino")
-        else:
-            print("⚠️ No hay puertos COM disponibles")
+                QMessageBox.critical(self, "❌ Error de conexión", f"No se pudo conectar a {self.selected_com}")
 
-    def BandaPower(self):
-            #self.enviar_comando("RELE_ON")
-            print("🔌 Relé encendido")
+    def ConectarCam(self):
+        if self.comboCamaras.count() > 0:
+            self.selected_camera_index = int(self.comboCamaras.currentText().split()[1])
+            try:
+                self.cap = cv2.VideoCapture(self.selected_camera_index)
+                self.cap.set(3, 1280)
+                self.cap.set(4, 720)
+            except:
+                QMessageBox.critical(self, "❌ Error de conexión", f"No se pudo conectar a la cámara {self.selected_camera_index}")
 
-    def offbanda(self):
-            #self.enviar_comando("RELE_OFF")
-            print("🔌 Relé apagado")
+    def DercPower(self):
+            self.enviar_comando("D")
+            self.ValorDireccion = "D"
+
+    def IzquiPower(self):
+            self.enviar_comando("I")
+            self.ValorDireccion = "I"
 
     def Servo(self):
-            #self.enviar_comando("SERVO_ON")
-            print("🔧 Se activo el SERVO")
+            self.enviar_comando("SERVO_ON")
 
     def llenar_lista_desde_db(self):
         """Llena el QListWidget con los lotes desde DB"""
@@ -186,17 +191,17 @@ class MainApp(QMainWindow):
 
         print("fin del metodo")
 
-    def controlar_actuadores(self, tipo_objeto):
-        comandos = {
-            "miliometrico": ["LED_ON"],
-            "tuerca": ["LED_OFF", "SERVO_ON"],
-        }
-        if tipo_objeto in comandos:
-            for cmd in comandos[tipo_objeto]:
-                self.enviar_comando(cmd)
-        else:
-            self.enviar_comando("LED_OFFALL")
-            self.enviar_comando("ENCENDER_BANDA")
+    # def controlar_actuadores(self, tipo_objeto):
+    #     comandos = {
+    #         "miliometrico": ["LED_ON"],
+    #         "tuerca": ["SERVO_ON"]
+    #     }
+    #     if tipo_objeto in comandos:
+    #         for cmd in comandos[tipo_objeto]:
+    #             self.enviar_comando(cmd)
+    #     else:
+    #         self.enviar_comando("LED_OFFALL")
+    #         self.enviar_comando("ENCENDER_BANDA")
             
     def agregar_lote(self):
         nuevo_lote = self.nuevolote.text().strip()
@@ -266,6 +271,9 @@ class MainApp(QMainWindow):
 
     def redneural(self):
         # Lee un frame de la cámara
+        if not hasattr(self, 'cap') or not self.cap.isOpened():
+            return
+        
         ret, frame = self.cap.read()
         # Si no se puede leer el frame, retorna
         if not ret:
@@ -275,7 +283,7 @@ class MainApp(QMainWindow):
         annotated_frame = results[0].plot()
 
         if results[0].boxes and len(results[0].boxes) > 0 and time.time() - self.deley > 4:
-            self.enviar_comando("DETENER_BANDA")
+            self.enviar_comando("P")
             print("🔍 Detectando objetos...")
             nombres_detectados = results[0].names
             clases_detectadas = results[0].boxes.cls.tolist()
@@ -293,14 +301,21 @@ class MainApp(QMainWindow):
                 largo = float(y2 - y1)
                 nombre = nombres[i]
 
-                valido = True if nombre == "tuerca" else False
+                valido = True if nombre == "Limon" else False
                 self.db.insertar_objeto(ancho=ancho, largo=largo, valido=valido,fecha=datetime.now() ,lote=lote_actual)
                 print(f"💾 Guardando en DB: {lote_actual}, {nombre}, {ancho}px x {largo}px")
 
-            self.controlar_actuadores(nombre)
+            if nombre == "good":
+                print("W")
+                self.enviar_comando
+
+            if nombre == "limon":
+                print("B")
+                self.Servo()
+                
             # Enviar comando al Arduino para encender la banda después de 2 segundos
             # Esto es para evitar que se envíe el comando inmediatamente después de detectar un objeto
-            QTimer.singleShot(2000, lambda: self.enviar_comando("ENCENDER_BANDA"))
+            QTimer.singleShot(2000, lambda: self.enviar_comando(self.ValorDireccion))
             self.deley = time.time()  # Actualizar deley después de cada detección
 
         # Convertir a QImage para mostrar en QLabel
