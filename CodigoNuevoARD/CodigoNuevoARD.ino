@@ -35,8 +35,6 @@ void setup() {
   pinMode(ledN, OUTPUT);
   pinMode(izquierda, OUTPUT);
   pinMode(derecha, OUTPUT);
-
-  Serial.println("Sistema iniciado");
 }
 
 void loop() {
@@ -47,7 +45,6 @@ void loop() {
       analogWrite(derecha, 0);
       analogWrite(izquierda, 0);
       motorActivo = false;
-      Serial.println("PUENTE H: Banda detenida (botón)");
       lastDebounceTime = millis();
     }
   }
@@ -57,7 +54,6 @@ void loop() {
   if (moviendoServo && (millis() - tiempoInicioServo >= duracionServo)) {
     myServo.write(0);
     moviendoServo = false;
-    Serial.println("SERVO: Movimiento completado");
   }
 
   // Control de la banda (si memoria = 1 y enable = LOW)
@@ -89,13 +85,13 @@ void loop() {
       myServo.write(180);
       moviendoServo = true;
       tiempoInicioServo = millis();
-    } else if (input == "LED_ON") {
+    } else if (input == "LEN_T") {
       digitalWrite(ledV, HIGH);
       digitalWrite(ledN, LOW);
-    } else if (input == "LED_OFF") {
+    } else if (input == "LED_F") {
       digitalWrite(ledV, LOW);
       digitalWrite(ledN, HIGH);
-    } else if (input == "LED_OFFALL") {
+    } else if (input == "LED_OFF") {
       digitalWrite(ledV, LOW);
       digitalWrite(ledN, LOW);
     } else if (input == "ENCENDER_BANDA") {

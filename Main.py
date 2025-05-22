@@ -22,10 +22,7 @@ class MainApp(QMainWindow):
         self.deley = time.time()
         # Conexión con Arduino
         self.selected_com = None
-        self.selected_camera_index = 0  # Por defecto
-            # Cambia 'COM8' por el puerto correcto de tu Arduino
-            # Asegúrate de que el puerto esté disponible y sea correcto
-        
+        self.selected_camera_index = 0
 
         # ComboBox para seleccionar puerto COM
         self.comboCOMs = QComboBox()
@@ -43,7 +40,7 @@ class MainApp(QMainWindow):
         self.cameraLabel.setFixedSize(640, 360)
         self.cameraLabel.setStyleSheet("background-color: black")
 
-        # Botones para encender/apagar la banda
+        # Botones con sus funciones
         self.DerechaButton = QPushButton("LADO 1 ►")
         self.IzquierdaButton = QPushButton("LADO 2 ◄")
         self.BotonConecArd = QPushButton("Conectar con Arduino")
@@ -54,9 +51,6 @@ class MainApp(QMainWindow):
         self.BotonConecArd.clicked.connect(self.ConectarArd)
         self.BotonConecCam.clicked.connect(self.ConectarCam)
         self.BotonServo.clicked.connect(self.Servo)
-
-        self.servo = QPushButton("Servo")
-        self.servo.clicked.connect(self.Servo)
 
         #comboBox para seleccionar lotes
         self.comboLotes = QComboBox()
@@ -88,7 +82,8 @@ class MainApp(QMainWindow):
         botones_layout = QHBoxLayout()
         botones_layout.addWidget(self.DerechaButton)
         botones_layout.addWidget(self.IzquierdaButton)
-
+        
+        # Etiqueta para mostrar el total
         self.total_label = QLabel()
         self.total_label.setText("Total: 0")
         self.total_label.setStyleSheet("font-size: 20px; font-weight: bold; color: black;")
@@ -131,7 +126,7 @@ class MainApp(QMainWindow):
         # Timer para actualizar la gráfica
         self.graph_timer = QTimer()
         self.graph_timer.timeout.connect(self.actualizar_grafica)
-        self.graph_timer.start(500)  # cada medio segundo
+        self.graph_timer.start(500)
 
         # Inicializar la base de datos para obtener los lotes
         self.db = DBManager()
@@ -157,6 +152,7 @@ class MainApp(QMainWindow):
                 self.cap = cv2.VideoCapture(self.selected_camera_index)
                 self.cap.set(3, 1280)
                 self.cap.set(4, 720)
+                QMessageBox.information(self, "✅ Conexión exitosa", f"Conectado a la cámara {self.selected_camera_index}")
             except:
                 QMessageBox.critical(self, "❌ Error de conexión", f"No se pudo conectar a la cámara {self.selected_camera_index}")
 
@@ -183,26 +179,11 @@ class MainApp(QMainWindow):
             print(f"🔄 Enviando comando: {comando}")
             try:
                 self.arduino.write(comando.encode('utf-8') + b"\n")
-                print(f"✅ Comando '{comando}' enviado")
             except Exception as e:
-                print(f"❌ Error al enviar comando: {e}")
+                QMessageBox.critical(self, "❌ Error", "No hay conexión con el Arduino.")
         else:
-            print("⚠️ Arduino no conectado.")
+            QMessageBox.critical(self, "❌ Error", "Error inesperado")
 
-        print("fin del metodo")
-
-    # def controlar_actuadores(self, tipo_objeto):
-    #     comandos = {
-    #         "miliometrico": ["LED_ON"],
-    #         "tuerca": ["SERVO_ON"]
-    #     }
-    #     if tipo_objeto in comandos:
-    #         for cmd in comandos[tipo_objeto]:
-    #             self.enviar_comando(cmd)
-    #     else:
-    #         self.enviar_comando("LED_OFFALL")
-    #         self.enviar_comando("ENCENDER_BANDA")
-            
     def agregar_lote(self):
         nuevo_lote = self.nuevolote.text().strip()
 
@@ -269,22 +250,34 @@ class MainApp(QMainWindow):
             ax = self.graphWidget.getAxis('bottom')
             ax.setTicks([[(1, 'Válidos'), (2, 'No válidos')]])
 
+    def pixeles_a_cm(pixeles):
+        tamaño_en_pixeles = 160
+        tamaño_real_cm = 8
+        cm_por_pixel = tamaño_real_cm / tamaño_en_pixeles
+        return pixeles * cm_por_pixel
+
     def redneural(self):
-        # Lee un frame de la cámara
+        
+        # Verifica si la cámara está abierta
         if not hasattr(self, 'cap') or not self.cap.isOpened():
             return
         
+        # Lee un frame de la cámara
         ret, frame = self.cap.read()
+
         # Si no se puede leer el frame, retorna
         if not ret:
             return
+        
         # Redimensiona el frame a 640x640
         results = model.predict(frame, imgsz=640, conf=0.6)
         annotated_frame = results[0].plot()
 
+        # Si hay objetos detectados y el tiempo desde la última detección es mayor a 4 segundos
         if results[0].boxes and len(results[0].boxes) > 0 and time.time() - self.deley > 4:
             self.enviar_comando("P")
-            print("🔍 Detectando objetos...")
+
+            # Obtener los nombres y clases de los objetos detectados
             nombres_detectados = results[0].names
             clases_detectadas = results[0].boxes.cls.tolist()
             clases_detectadas = [int(c) for c in clases_detectadas]
@@ -294,28 +287,36 @@ class MainApp(QMainWindow):
 
             #bucle para guardar los objetos detectados en la base de datos
             for i, box in enumerate(boxes):
-                print(f"🔍 Objeto detectado: {nombres[i]}")
+                # Obtener el nombre y las dimensiones del objeto
                 nombre = nombres[i]
                 x1, y1, x2, y2 = box
                 ancho = float(x2 - x1)
                 largo = float(y2 - y1)
                 nombre = nombres[i]
 
+                # Convertir de píxeles a centímetros
+                ancho_cm = self.pixeles_a_cm(ancho)
+                largo_cm = self.pixeles_a_cm(largo)
+                # Guardar en la base de datos
                 valido = True if nombre == "Limon" else False
-                self.db.insertar_objeto(ancho=ancho, largo=largo, valido=valido,fecha=datetime.now() ,lote=lote_actual)
-                print(f"💾 Guardando en DB: {lote_actual}, {nombre}, {ancho}px x {largo}px")
+                self.db.insertar_objeto(ancho=ancho_cm, largo=largo_cm, valido=valido,fecha=datetime.now() ,lote=lote_actual)
 
-            if nombre == "good":
+            # verificamos que objeto fue detectado
+            # y enviamos el comando correspondiente al arduino
+            if nombre == "bad":
                 print("W")
-                self.enviar_comando
-
+                self.enviar_comando("LED_F")
+                QTimer.singleShot(3000, lambda: self.Servo())
+                QTimer.singleShot(1000, lambda: self.enviar_comando("LED_OFF"))
+                
             if nombre == "limon":
                 print("B")
-                self.Servo()
-                
+                self.enviar_comando("LED_T")
+                QTimer.singleShot(1000, lambda: self.enviar_comando("LED_OFF"))
+
             # Enviar comando al Arduino para encender la banda después de 2 segundos
             # Esto es para evitar que se envíe el comando inmediatamente después de detectar un objeto
-            QTimer.singleShot(2000, lambda: self.enviar_comando(self.ValorDireccion))
+            QTimer.singleShot(1000, lambda: self.enviar_comando(self.ValorDireccion))
             self.deley = time.time()  # Actualizar deley después de cada detección
 
         # Convertir a QImage para mostrar en QLabel
