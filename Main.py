@@ -12,7 +12,7 @@ import time
 
 #ruta del modelo YOLOv8
 #Asegúrate de que la ruta sea correcta y que el modelo esté disponible
-ruta_best = os.path.join("runs", "detect", "train4", "weights", "best.pt")
+ruta_best = os.path.join("best.pt")
 model = YOLO(ruta_best)
 
 class MainApp(QMainWindow):
@@ -231,7 +231,10 @@ class MainApp(QMainWindow):
         
         # Verifica si el resultado es válido
         if resultado:
-            validos, no_validos = map(float, resultado)
+            try:
+                validos, no_validos = map(float, resultado)
+            except:
+                return
             self.total_label.setText(f"Total: {validos + no_validos}")
             self.graphWidget.setTitle(f"Registro de piezas por lote: {lote_actual}")
 
@@ -255,28 +258,10 @@ class MainApp(QMainWindow):
         tamaño_real_cm = 8
         cm_por_pixel = tamaño_real_cm / tamaño_en_pixeles
         return pixeles * cm_por_pixel
-
-    def redneural(self):
-        
-        # Verifica si la cámara está abierta
-        if not hasattr(self, 'cap') or not self.cap.isOpened():
-            return
-        
-        # Lee un frame de la cámara
-        ret, frame = self.cap.read()
-
-        # Si no se puede leer el frame, retorna
-        if not ret:
-            return
-        
-        # Redimensiona el frame a 640x640
-        results = model.predict(frame, imgsz=640, conf=0.6)
-        annotated_frame = results[0].plot()
-
-        # Si hay objetos detectados y el tiempo desde la última detección es mayor a 4 segundos
-        if results[0].boxes and len(results[0].boxes) > 0 and time.time() - self.deley > 4:
-            self.enviar_comando("P")
-
+    
+    def obtencion_datos(self,results):
+        if results[0].boxes and len(results[0].boxes) > 0 and time.time() - self.deley > 10:
+            self.enviar_comando("p")
             # Obtener los nombres y clases de los objetos detectados
             nombres_detectados = results[0].names
             clases_detectadas = results[0].boxes.cls.tolist()
@@ -295,29 +280,41 @@ class MainApp(QMainWindow):
                 nombre = nombres[i]
 
                 # Convertir de píxeles a centímetros
-                ancho_cm = self.pixeles_a_cm(ancho)
-                largo_cm = self.pixeles_a_cm(largo)
+                ancho_cm = ancho #self.pixeles_a_cm(ancho)
+                largo_cm = largo #self.pixeles_a_cm(largo)
                 # Guardar en la base de datos
-                valido = True if nombre == "Limon" else False
+                valido = True if nombre == "good" else False
                 self.db.insertar_objeto(ancho=ancho_cm, largo=largo_cm, valido=valido,fecha=datetime.now() ,lote=lote_actual)
 
-            # verificamos que objeto fue detectado
-            # y enviamos el comando correspondiente al arduino
-            if nombre == "bad":
-                print("W")
-                self.enviar_comando("LED_F")
-                QTimer.singleShot(3000, lambda: self.Servo())
-                QTimer.singleShot(1000, lambda: self.enviar_comando("LED_OFF"))
-                
-            if nombre == "limon":
-                print("B")
-                self.enviar_comando("LED_T")
-                QTimer.singleShot(1000, lambda: self.enviar_comando("LED_OFF"))
+                if nombre == "bad":
+                    self.enviar_comando("LED_F")
+                    #QTimer.singleShot(4000, lambda: self.Servo())
+                    QTimer.singleShot(2000, lambda: self.enviar_comando("LED_OFF"))
+                    
+                if nombre == "good":
+                    self.enviar_comando("LED_T")
+                    QTimer.singleShot(2000, lambda: self.enviar_comando("LED_OFF"))
 
-            # Enviar comando al Arduino para encender la banda después de 2 segundos
-            # Esto es para evitar que se envíe el comando inmediatamente después de detectar un objeto
-            QTimer.singleShot(1000, lambda: self.enviar_comando(self.ValorDireccion))
-            self.deley = time.time()  # Actualizar deley después de cada detección
+                QTimer.singleShot(2000, lambda: self.enviar_comando(self.ValorDireccion))
+                self.deley = time.time()  # Actualizar deley después de cada detección
+
+    def redneural(self):
+        
+        # Verifica si la cámara está abierta
+        if not hasattr(self, 'cap') or not self.cap.isOpened():
+            return
+        
+        # Lee un frame de la cámara
+        ret, frame = self.cap.read()
+
+        # Si no se puede leer el frame, retorna
+        if not ret:
+            return
+        
+        # Redimensiona el frame a 640x640
+        results = model.predict(frame, imgsz=640, conf=0.6)
+        annotated_frame = results[0].plot()
+        QTimer.singleShot(1500, lambda: self.obtencion_datos(results))
 
         # Convertir a QImage para mostrar en QLabel
         rgb_image = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)

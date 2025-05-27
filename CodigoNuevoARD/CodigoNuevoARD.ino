@@ -35,6 +35,7 @@ void setup() {
   pinMode(ledN, OUTPUT);
   pinMode(izquierda, OUTPUT);
   pinMode(derecha, OUTPUT);
+  myServo.write(0);
 }
 
 void loop() {
@@ -82,7 +83,7 @@ void loop() {
       analogWrite(izquierda, 0);
       analogWrite(derecha, 255);
     } else if (input == "SERVO_ON") {
-      myServo.write(180);
+      myServo.write(90);
       moviendoServo = true;
       tiempoInicioServo = millis();
     } else if (input == "LEN_T") {

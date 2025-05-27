@@ -2,9 +2,9 @@ import cv2
 from ultralytics import YOLO
 import os
 
-ruta_best = os.path.join("runs", "detect", "train4", "weights", "best.pt")
+ruta_best = os.path.join("best.pt")
 
-cap = cv2.VideoCapture(0)  # Cambia 0 por la ruta de tu video si es necesario
+cap = cv2.VideoCapture(1)  # Cambia 0 por la ruta de tu video si es necesario
 cap.set(3,1280)  # Ancho
 cap.set(4,720)  # Alto
 
