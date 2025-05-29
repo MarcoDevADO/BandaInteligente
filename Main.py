@@ -131,8 +131,19 @@ class MainApp(QMainWindow):
         # Inicializar la base de datos para obtener los lotes
         self.db = DBManager()
         self.llenar_lista_desde_db()
+        
+        
+        
         self.objeto_actual = None
         self.objeto_visto_anteriormente = None
+        self.hilo_espera_sensor = None
+
+    def closeEvent(self, event):
+        if self.hilo_espera_sensor and self.hilo_espera_sensor.isRunning():
+            self.hilo_espera_sensor.detener()
+            self.hilo_espera_sensor.wait()
+        event.accept()
+
     
     def ConectarArd(self):
         if self.comboCOMs.count() > 0:
@@ -259,9 +270,34 @@ class MainApp(QMainWindow):
         cm_por_pixel = tamaño_real_cm / tamaño_en_pixeles
         return pixeles * cm_por_pixel
     
+    def iniciar_espera_sensor_ir(self):
+        if self.arduino and self.arduino.is_open:
+            # Detiene hilo anterior si aún está corriendo
+            if self.hilo_espera_sensor and self.hilo_espera_sensor.isRunning():
+                self.hilo_espera_sensor.detener()
+                self.hilo_espera_sensor.wait()
+
+            # Limpia el buffer serial para evitar lecturas antiguas
+            self.arduino.reset_input_buffer()
+
+            # Crea y lanza un nuevo hilo
+            self.hilo_espera_sensor = EsperaSensorThread(self.arduino)
+            self.hilo_espera_sensor.deteccion.connect(self.accion_tras_deteccion_sensor)
+            self.hilo_espera_sensor.start()
+            print("🔵 Esperando detección del sensor IR...")
+        else:
+            print("❌ Arduino no está conectado.")
+
+
+    def accion_tras_deteccion_sensor(self):
+        print("🟢 Activando servo tras detección IR")
+        QTimer.singleShot(1000,lambda:self.enviar_comando("SERVO_ON"))
+        self.enviar_comando("LED_OFF")
+
+
+    
     def obtencion_datos(self,results):
-        if results[0].boxes and len(results[0].boxes) > 0 and time.time() - self.deley > 10:
-            self.enviar_comando("p")
+        if results[0].boxes and len(results[0].boxes) > 0 and time.time() - self.deley > 6:
             # Obtener los nombres y clases de los objetos detectados
             nombres_detectados = results[0].names
             clases_detectadas = results[0].boxes.cls.tolist()
@@ -289,6 +325,7 @@ class MainApp(QMainWindow):
                 if nombre == "bad":
                     self.enviar_comando("LED_F")
                     #QTimer.singleShot(4000, lambda: self.Servo())
+                    self.iniciar_espera_sensor_ir()
                     QTimer.singleShot(2000, lambda: self.enviar_comando("LED_OFF"))
                     
                 if nombre == "good":
@@ -314,7 +351,7 @@ class MainApp(QMainWindow):
         # Redimensiona el frame a 640x640
         results = model.predict(frame, imgsz=640, conf=0.6)
         annotated_frame = results[0].plot()
-        QTimer.singleShot(1500, lambda: self.obtencion_datos(results))
+        self.obtencion_datos(results)
 
         # Convertir a QImage para mostrar en QLabel
         rgb_image = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
@@ -323,6 +360,31 @@ class MainApp(QMainWindow):
         qt_image = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
         pixmap = QPixmap.fromImage(qt_image).scaled(self.cameraLabel.size(), Qt.KeepAspectRatio)
         self.cameraLabel.setPixmap(pixmap)
+
+class EsperaSensorThread(QThread):
+    deteccion = pyqtSignal()
+
+    def __init__(self, arduino):
+        super().__init__()
+        self.arduino = arduino
+        self.running = True
+
+    def run(self):
+        while self.running:
+            if self.arduino.in_waiting > 0:
+                linea = self.arduino.readline().decode(errors="ignore").strip()
+                print(f"📥 Línea recibida del Arduino: {linea}")
+                if not self.running:
+                    break
+                if linea == "DETECCION_IR":
+                    print("🟢 Sensor IR detectó algo")
+                    self.deteccion.emit()
+                    break
+
+
+    def detener(self):
+        self.running = False
+
 
 if __name__ == "__main__":
     import sys
